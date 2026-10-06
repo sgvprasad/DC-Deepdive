@@ -82,3 +82,4 @@ While pure TCP cannot be extended to multicast scale, alternative protocols have
 * **SRM** (Scalable Reliable Multicast)
 * **RMTP** (Reliable Multicast Transport Protocol)
 * **PGM** (Pragmatic General Multicast) — Widely supported by Cisco and Juniper networks.
+* But none of these are TCP and none work like TCP.
