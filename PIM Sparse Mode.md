@@ -1,7 +1,9 @@
 #Why RPF needed in PIM ?, When the PIM Tree with *PIM states/signalling* is Built to be loop free already 
 
 PIM Tree or the PIM Forwarding states are in *Control Plane*.
+
 In *Data Plane* While the Actual data packets still needs a check while forwarding.
+
 The PIM tree defines downstream interfaces (OIL — Outgoing Interface List). But a router can receive the same multicast stream on multiple interfaces — especially during:
 	• SPT switchover (from RPT to Shortest Path Tree)
 	• Topology changes / reconvergence
