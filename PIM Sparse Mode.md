@@ -83,3 +83,68 @@ While pure TCP cannot be extended to multicast scale, alternative protocols have
 * **RMTP** (Reliable Multicast Transport Protocol)
 * **PGM** (Pragmatic General Multicast) — Widely supported by Cisco and Juniper networks.
 * But none of these are TCP and none work like TCP.
+
+---
+
+## 📡 Topic 6: PIM Sparse Mode (PIM-SM) Register Mechanics
+> **Core Concept:** Deep dive into the First-Hop Router (FHR) and Rendezvous Point (RP) communication workflow, analyzing Null Register transmission behaviors, keepalive states, and state transition logic.
+
+### 🔄 The FHR Null Register Keepalive Loop
+**The FHR keeps sending Null (Empty) Register messages every 60 seconds as long as it continues to receive multicast traffic from the source.** 
+
+This functions as a vital data plane keepalive mechanism because the RP may not have a direct topological view of the source. Without these periodic signals, the RP would assume the source has timed out.
+
+#### ⏱️ Key Parameter Configuration
+* **Cisco Default:** Register Suppression Timer = **60 seconds**.
+* This specific timer boundary dictates exactly how often the FHR is forced to generate a new Null Register packet to sustain the remote state.
+
+### 🤫 The RP Response Rule (Silent Refresh)
+**The RP does not reply to periodic Null Register messages.** 
+
+Once the initial topology state is established and a working native path exists, the registration path changes into a one-way tracking loop:
+1. The FHR transmits a periodic Null Register every 60 seconds.
+2. The RP receives the empty payload packet and immediately refreshes its local `(S,G)` timer metrics.
+3. The RP remains completely silent; **no Register-Stop message is generated** in response to a Null Register.
+
+#### 📈 Scalability Design
+If the RP generated response packets for every periodic keepalive across thousands of active multicast streams, it would exhaust CPU processing queues and waste network link bandwidth. Null Registers are explicitly designed as **one-way keepalives**.
+
+---
+
+### 🕒 PIM-SM Registration Lifecycle Timeline
+
+```text
+[Source Starts] ➔ [FHR Encapsulates Data] ➔ [RP Joins SPT] ➔ [Native Path Active] 
+                                                                     │
+[RP Silent Refresh] ⬅ [FHR Sends Null Registers] ⬅ [RP Sends Register-Stop] 🔀
+```
+
+#### 🛠️ Comprehensive Step-by-Step State Flow
+1. **Source Activation:** The multicast source begins transmitting traffic. The FHR receives these initial raw multicast packets.
+2. **Initial Registration:** The FHR encapsulates the first few data packets inside standard PIM Register messages and tunnels them directly to the designated RP.
+3. **Control Tree Building:** The RP receives the data-encapsulated Register packet, extracts the source information, and immediately sends an `(S,G)` Join message upstream toward the source to build the Shortest Path Tree (SPT).
+4. **Native Traffic Delivery:** The native multicast distribution tree completes convergence. Source packets now flow natively from `Source ➔ FHR ➔ RP` via standard multicast routing without needing encapsulation.
+5. **Encapsulation Suppression:** Once native packets begin arriving on the tree interface, the RP transmits a single **Register-Stop** message down to the FHR.
+6. **Suppression State Entry:** The FHR receives the Register-Stop, immediately halts all data encapsulation mechanisms, and initializes its 60-second Register Suppression Timer.
+7. **Keepalive Execution:** While data encapsulation is turned off, the source remains highly active. Every 60 seconds, the FHR transmits an empty **Null Register** packet to the RP.
+8. **Silent Upstream Refresh:** The RP receives the empty Null Register, verifies the active status of the source, updates its internal timers, and remains silent (no response sent back).
+9. **Teardown Trigger:** When the multicast source eventually stops sending data, the FHR instantly stops generating Null Register messages. If no traffic or registers arrive for 3 minutes, the RP expires the stale `(S,G)` state entirely.
+
+---
+
+### 📊 PIM-SM Register Protocol Comparison Matrix
+
+| Message Type | Direction | Trigger Condition | Primary Operational Purpose | Does RP Respond? |
+| :--- | :--- | :--- | :--- | :--- |
+| **Register (With Data)** | FHR ➔ RP | Initial multicast source packet arrival. | Notifies the RP that a source exists and tunnels the first packet. | **Yes**, RP replies with a Register-Stop once native path functions. |
+| **Register-Stop** | RP ➔ FHR | Native traffic successfully arrives via the SPT. | Instructs the FHR to cease processing CPU-heavy data encapsulation. | N/A (Control message directed down to FHR). |
+| **Null Register (Empty)** | FHR ➔ RP | Periodic timer expiry (60s) while source remains active. | Acts as a persistent keepalive to prove the source is still active. | **❌ No**, RP processes the state change silently. |
+
+---
+
+### 🔬 Operational Behavioral Constraints
+
+#### Q: Does the FHR send Null Register messages even after an (S,G) Join is received?
+**Yes.** An incoming `(S,G)` Join message from the RP does not suppress Null Registers. The Join message merely builds the native data pathway. 
+
+Only an explicit Register-Stop packet tells the FHR to swap from sending heavy Data-Registers to sending lightweight Null Registers. The FHR must continue sending these Null Registers every 60 seconds for the entire lifetime of the active source, completely independent of the existing `(S,G)` state adjustments.
