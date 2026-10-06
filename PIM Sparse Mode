@@ -20,7 +20,63 @@ Summary
 The PIM tree being loop-free is a topological guarantee (control plane). RPF is a per-packet forwarding correctness check (data plane). 
 They solve two different problems — one builds the right structure, the other ensures only legitimate traffic flows through it.
 PIM Tree   →   Builds the correct highway system
-RPF Check  →   Traffic police at every on-ramp, 
+RPF Check  →   Traffic police at every Junction
+
+
+##During RPT switchover we get any extra packets to the Receiver ?
+ 
+Yes — the receiver CAN get duplicate packets during SPT switchover. They are not always dropped by intermediate routers.
+
+What Actually Happens During SPT Switchover
+Phase 1: Traffic flowing via RPT (through RP)
+         Source → RP → DR → Receiver
+
+Phase 2: SPT Join sent upstream toward Source
+         Source → DR → Receiver  (new shorter path)
+
+Overlap Window: BOTH paths are briefly active
+During this overlap window, the Last Hop Router (LHR) receives the same multicast stream on two interfaces simultaneously — one from RPT, one from SPT.
+
+What the LHR Does
+Packet arrives on SPT interface (toward Source)
+→ RPF check PASSES  ✅
+→ Forwarded to receiver
+
+Packet arrives on RPT interface (toward RP)
+→ RPF check FAILS  ❌  (RPF now points toward Source, not RP)
+→ DROPPED by LHR
+So the RPT copy gets dropped once the RPF interface flips to the SPT path.
+
+But Here's the Catch — The Transition Moment
+Timeline:
+|----RPT only----|--BOTH active--|----SPT only----|
+                 ↑               ↑
+            SPT join sent    RPF flips to SPT
+            
+         During this gap → DUPLICATES reach receiver
+	• The moment SPT traffic starts arriving but before RPF fully flips — both copies can be forwarded
+	• This window is very brief (milliseconds) but duplicates do reach the receiver
+
+
+The PIM-SM Mechanism That Limits This
+Once LHR is fully on SPT, it sends a Prune toward the RP on the RPT:
+LHR → (S,G,rpt) Prune → RP
+This tears down the RPT branch, eliminating the duplicate path entirely.
+
+Complete Timeline
+1. LHR receiving via RPT
+2. LHR traffic rate exceeds threshold → triggers SPT Join
+3. SPT Join travels upstream toward Source DR
+4. Source starts sending on SPT path
+5. ← Brief duplicate window here →
+6. RPF flips to SPT interface
+7. RPT packets now fail RPF → dropped at LHR
+8. LHR sends (S,G,rpt) Prune to RP
+9. RP tears down that RPT branch
+10. Clean SPT forwarding only
+
+Bottom Line
+	RPF limits the duplicate window but cannot eliminate it entirely during the transition. A small burst of duplicates reaching the receiver is expected and normal behavior in PIM-SM SPT switchover — it's not a bug, it's an accepted trade-off for the simplicity of the mechanism.
 
 
 
